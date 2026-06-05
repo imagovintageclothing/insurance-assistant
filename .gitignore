@@ -1,0 +1,4 @@
+.streamlit/secrets.toml
+password.txt
+**/__pycache__/
+.env
