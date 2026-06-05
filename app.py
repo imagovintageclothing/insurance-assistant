@@ -55,10 +55,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     background: linear-gradient(135deg, #1a1f2e 0%, #1e2538 100%);
     border: 1px solid #2d3748;
     border-radius: 16px;
-    padding: 2.5rem;
+    padding: 2rem 2rem 1.5rem 2rem;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     max-width: 420px;
-    margin: 0 auto;
+    margin: 0 auto 1.5rem auto;
 }
 
 /* Metric cards per i filtri stato */
@@ -129,10 +129,15 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     box-shadow: 0 4px 20px rgba(91,125,216,0.4) !important;
 }
 
-/* Nasconde hamburger menu */
+/* Nasconde hamburger menu, bottone di deploy e footer */
 #MainMenu { visibility: hidden; }
+.stDeployButton { visibility: hidden; }
 footer { visibility: hidden; }
-header { visibility: hidden; }
+
+/* Rende trasparente l'header e mantiene visibile il pulsante di riapertura barra laterale */
+[data-testid="stHeader"] {
+    background: transparent !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -340,7 +345,7 @@ def render_login():
         st.markdown(
             """
             <div class="login-card">
-                <div style="text-align:center; margin-bottom:1.5rem;">
+                <div style="text-align:center; margin-bottom:0;">
                     <span style="font-size:3rem;">🛡️</span>
                     <h2 style="color:#c8d3e8; margin:0.5rem 0 0.2rem; font-weight:700;">
                         Gestionale Perizie
