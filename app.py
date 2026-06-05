@@ -964,14 +964,6 @@ def render_sidebar() -> str:
 
         st.markdown("<hr style='border-color:#2d3748; margin:1rem 0;'>", unsafe_allow_html=True)
 
-        # Nuova pratica rapida
-        if st.button("➕ Nuova Pratica", use_container_width=True, key="btn_sidebar_nuova"):
-            st.session_state.pop("pratica_in_modifica", None)
-            st.session_state.pop("veicoli_in_modifica", None)
-            st.session_state.pop("relazione_generata", None)
-            st.session_state["active_tab"] = "➕ Nuova Pratica / Modifica"
-            st.rerun()
-
         # Logout
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("🚪 Logout", use_container_width=True, key="btn_logout"):
