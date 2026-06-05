@@ -167,7 +167,7 @@ def genera_numero_protocollo() -> str:
 def carica_pratiche(client: Client) -> pd.DataFrame:
     """Carica tutte le pratiche dalla tabella 'pratiche'."""
     try:
-        response = client.table("pratiche").select("*").order("created_at", desc=True).execute()
+        response = client.table("pratiche").select("*").order("data_creazione_record", desc=True).execute()
         if response.data:
             return pd.DataFrame(response.data)
         return pd.DataFrame()
