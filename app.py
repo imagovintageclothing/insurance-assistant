@@ -262,20 +262,25 @@ def salva_pratica(client: Client, dati_pratica: dict, dati_veicoli: list) -> tup
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPER: GENERAZIONE RELAZIONE IA (simulata / reale con OpenAI)
+# HELPER: GENERAZIONE RELAZIONE IA (simulata / reale con Groq)
 # ══════════════════════════════════════════════════════════════════════════════
 def genera_relazione_ia(dati_anagrafica: dict, veicoli: list, dinamica: str) -> str:
     """
     Genera una relazione formale.
-    Se la chiave openai è configurata in secrets.toml, usa l'API OpenAI.
+    Se le credenziali Groq sono configurate in secrets.toml, usa l'API Groq.
     Altrimenti restituisce una relazione modello compilata.
     """
 
-    # ── Tentativo con OpenAI ─────────────────────────────────────────────────
+    # ── Tentativo con Groq ───────────────────────────────────────────────────
     try:
         import openai
-        openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
-        if openai.api_key:
+        groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+        groq_base_url = st.secrets.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        if groq_api_key:
+            client_groq = openai.OpenAI(
+                api_key=groq_api_key,
+                base_url=groq_base_url,
+            )
             veicoli_str = "\n".join(
                 [
                     f"  - {v.get('ruolo','')}: Targa {v.get('targa','N/D')}, "
@@ -302,8 +307,8 @@ DINAMICA SINTETICA:
 
 Struttura la relazione con: intestazione formale, fatto (dinamica), veicoli coinvolti, conclusioni peritali.
 """
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
+            response = client_groq.chat.completions.create(
+                model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1500,
             )
@@ -583,46 +588,48 @@ def _render_chat_ia(df: pd.DataFrame):
 
 
 def _risposta_chat_ia(domanda: str, df: pd.DataFrame) -> str:
-    """Motore di risposta semplice per la chat IA (interrogazione in-memory)."""
-    d = domanda.lower()
+    """
+    Risponde alla domanda dell'utente usando Groq LLM con i dati del DataFrame
+    come contesto. Fallback a messaggio di errore se Groq non è disponibile.
+    """
+    try:
+        import openai
 
-    if "quante" in d or "numero" in d or "totale" in d:
-        if "aperta" in d:
-            n = len(df[df.get("stato_pratica", pd.Series()).str.lower() == "aperta"]) if "stato_pratica" in df.columns else "N/D"
-            return f"Hai **{n}** pratiche in stato *Aperta* nei risultati correnti."
-        if "chiusa" in d and "chiusura" not in d:
-            n = len(df[df.get("stato_pratica", pd.Series()).str.lower() == "chiusa"]) if "stato_pratica" in df.columns else "N/D"
-            return f"Hai **{n}** pratiche *Chiuse* nei risultati correnti."
-        if "chiusura" in d:
-            n = len(df[df.get("stato_pratica", pd.Series()).str.lower() == "in chiusura"]) if "stato_pratica" in df.columns else "N/D"
-            return f"Hai **{n}** pratiche *In Chiusura* nei risultati correnti."
-        return f"Il totale delle pratiche nei risultati correnti è **{len(df)}**."
+        groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+        groq_base_url = st.secrets.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
-    if "compagnia" in d or "assicurazion" in d:
-        if "compagnia" in df.columns:
-            top = df["compagnia"].value_counts().head(3)
-            lines = "\n".join([f"- **{k}**: {v} pratiche" for k, v in top.items()])
-            return f"Le compagnie più frequenti:\n{lines}"
+        if not groq_api_key:
+            return "⚠️ Chiave API Groq non configurata. Aggiungila in `.streamlit/secrets.toml`."
 
-    if "riparatore" in d:
-        if "riparatore" in df.columns:
-            top = df["riparatore"].value_counts().head(3)
-            lines = "\n".join([f"- **{k}**: {v} pratiche" for k, v in top.items()])
-            return f"I riparatori più frequenti:\n{lines}"
+        # Serializza il DataFrame in CSV compatto (max 200 righe per non sforare i token)
+        df_context = df.head(200).to_csv(index=False)
 
-    if "ultima" in d or "recente" in d:
-        if "created_at" in df.columns:
-            ultima = df.iloc[0]
-            return (
-                f"La pratica più recente è **{ultima.get('numero_protocollo','N/D')}** "
-                f"— {ultima.get('cognome_assistito','N/D')} {ultima.get('nome_assistito','')}"
-            )
+        system_prompt = f"""Sei un assistente database preciso per un gestionale di perizie assicurative.
+Rispondi SOLO basandoti sui dati reali forniti qui sotto — non inventare informazioni.
+Se la risposta non è ricavabile dai dati, dillo chiaramente.
+Rispondi sempre in italiano, in modo conciso e diretto.
 
-    # Fallback generico
-    return (
-        f"Ho analizzato **{len(df)}** pratiche. "
-        "Prova a chiedere: 'Quante pratiche aperte?', 'Qual è la compagnia più frequente?', 'Mostrami l'ultima pratica'."
-    )
+DATI CORRENTI (formato CSV, {len(df)} righe totali, mostrate le prime {min(len(df), 200)}):
+{df_context}"""
+
+        client_groq = openai.OpenAI(
+            api_key=groq_api_key,
+            base_url=groq_base_url,
+        )
+
+        response = client_groq.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": domanda},
+            ],
+            max_tokens=512,
+            temperature=0.2,
+        )
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"❌ Errore nella chiamata a Groq: {e}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
