@@ -138,6 +138,45 @@ footer { visibility: hidden; }
 [data-testid="stHeader"] {
     background: transparent !important;
 }
+
+/* Navigazione sidebar in stile tab premium */
+[data-testid="stSidebar"] div[role="radiogroup"] {
+    gap: 8px;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem !important;
+    transition: all 0.25s ease;
+    cursor: pointer;
+    margin: 0;
+    width: 100%;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+    display: none !important;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+    background-color: rgba(91, 125, 216, 0.08);
+    border-color: rgba(91, 125, 216, 0.2);
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+    background: linear-gradient(135deg, #1f2d4f 0%, #253660 100%) !important;
+    border-color: #5b7dd8 !important;
+    box-shadow: 0 4px 15px rgba(91, 125, 216, 0.15);
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label p,
+[data-testid="stSidebar"] div[role="radiogroup"] label span {
+    color: #8a9bb5 !important;
+    font-weight: 500 !important;
+    font-size: 0.95rem !important;
+    transition: color 0.2s ease;
+}
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) p,
+[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) span {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
