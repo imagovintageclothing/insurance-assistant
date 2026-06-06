@@ -220,6 +220,19 @@ def carica_pratiche(client: Client) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _normalizza_veicolo(v: dict) -> dict:
+    """Normalizza le chiavi di un record veicolo al formato atteso dal form.
+    Gestisce varianti di nome colonna restituite da Supabase.
+    """
+    return {
+        "ruolo":       v.get("ruolo", ""),
+        "targa":       v.get("targa", ""),
+        "modello":     v.get("modello", v.get("modello_auto", "")),
+        "conducente":  v.get("conducente", ""),
+        "proprietario": v.get("proprietario", ""),
+    }
+
+
 def carica_veicoli_per_pratica(client: Client, numero_protocollo: str) -> list:
     """Carica i veicoli/soggetti per una specifica pratica."""
     try:
@@ -229,8 +242,11 @@ def carica_veicoli_per_pratica(client: Client, numero_protocollo: str) -> list:
             .eq("numero_protocollo", numero_protocollo)
             .execute()
         )
-        return response.data or []
+        raw = response.data or []
+        print(f"[DEBUG] carica_veicoli_per_pratica({numero_protocollo}): {len(raw)} record → {raw}")
+        return [_normalizza_veicolo(v) for v in raw]
     except Exception as e:
+        print(f"[ERRORE] carica_veicoli_per_pratica: {e}")
         return []
 
 
@@ -646,6 +662,10 @@ def render_dashboard(client: Client):
                         veicoli = carica_veicoli_per_pratica(client, pratica_sel)
                         st.session_state["pratica_in_modifica"] = riga
                         st.session_state["veicoli_in_modifica"] = veicoli
+                        # Incrementa form_ver: forza la ricreazione di tutti i widget
+                        # del form con i valori del DB (evita che i valori cached
+                        # sovrascrivano i dati della pratica selezionata)
+                        st.session_state["form_ver"] = st.session_state.get("form_ver", 0) + 1
                         st.session_state["active_tab"] = "➕ Nuova Pratica / Modifica"
                         st.rerun()
                     else:
@@ -750,6 +770,11 @@ def render_form_pratica(client: Client):
     in_modifica = "pratica_in_modifica" in st.session_state and st.session_state["pratica_in_modifica"]
     dati = st.session_state.get("pratica_in_modifica", {}) or {}
     veicoli_esistenti = st.session_state.get("veicoli_in_modifica", []) or []
+
+    # ── Fallback: se siamo in modifica ma i veicoli non sono in state, caricali ora
+    if in_modifica and not veicoli_esistenti and dati.get("numero_protocollo"):
+        veicoli_esistenti = carica_veicoli_per_pratica(client, dati["numero_protocollo"])
+        st.session_state["veicoli_in_modifica"] = veicoli_esistenti
 
     # ── Inizializzazione session_state BLOCCO C ──
     if f"input_dinamica_{ver}" not in st.session_state:
@@ -861,50 +886,57 @@ def render_form_pratica(client: Client):
     # ══ BLOCCO B — VEICOLI COINVOLTI ════════════════════════════════════════
     st.markdown('<div class="block-header">🚗 BLOCCO B — Veicoli Coinvolti</div>', unsafe_allow_html=True)
 
-    num_veicoli_default = max(1, len(veicoli_esistenti)) if veicoli_esistenti else 1
+    # ── DEBUG TEMPORANEO: mostra i dati grezzi dal DB ────────────────────────
+    if in_modifica:
+        with st.expander("🐛 Debug veicoli (temporaneo)", expanded=False):
+            st.write("**veicoli_in_modifica:**", st.session_state.get("veicoli_in_modifica", "ASSENTE"))
+            st.write("**veicoli_esistenti:**", veicoli_esistenti)
+
+    if f"num_veicoli_val_{ver}" not in st.session_state:
+        st.session_state[f"num_veicoli_val_{ver}"] = max(1, len(veicoli_esistenti)) if veicoli_esistenti else 1
+
     num_veicoli = st.number_input(
         "Numero veicoli coinvolti",
         min_value=1,
         max_value=10,
-        value=num_veicoli_default,
+        key=f"num_veicoli_val_{ver}",
         step=1,
-        key=f"field_num_veicoli_{ver}",
     )
+
+    # Forzatura dello stato dinamico per i widget del Blocco B in modalità modifica
+    if in_modifica and veicoli_esistenti:
+        for idx, v in enumerate(veicoli_esistenti):
+            if idx < int(num_veicoli):
+                if f"v_targa_{idx}_{ver}" not in st.session_state:
+                    st.session_state[f"v_targa_{idx}_{ver}"] = v.get("targa", "")
+                if f"v_conducente_{idx}_{ver}" not in st.session_state:
+                    st.session_state[f"v_conducente_{idx}_{ver}"] = v.get("conducente", "")
+                if f"v_modello_{idx}_{ver}" not in st.session_state:
+                    st.session_state[f"v_modello_{idx}_{ver}"] = v.get("modello", "")
+                if f"v_proprietario_{idx}_{ver}" not in st.session_state:
+                    st.session_state[f"v_proprietario_{idx}_{ver}"] = v.get("proprietario", "")
 
     dati_veicoli = []
     for i in range(int(num_veicoli)):
         ruolo = "Assistito" if i == 0 else f"Controparte {i}"
-        v_esistente = veicoli_esistenti[i] if i < len(veicoli_esistenti) else {}
 
-        st.markdown(
-            f'<div class="vehicle-card"><div class="vehicle-title">🚘 Veicolo {i+1} — {ruolo}</div></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="vehicle-card"><div class="vehicle-title">🚘 Veicolo {i+1} — {ruolo}</div></div>', unsafe_allow_html=True)
         with st.container():
             colV1, colV2 = st.columns(2)
             with colV1:
-                targa = st.text_input(
-                    f"Targa *", value=v_esistente.get("targa", ""), key=f"v_targa_{i}_{ver}"
-                )
-                conducente = st.text_input(
-                    f"Conducente", value=v_esistente.get("conducente", ""), key=f"v_conducente_{i}_{ver}"
-                )
+                targa = st.text_input(f"Targa *", key=f"v_targa_{i}_{ver}")
+                conducente = st.text_input(f"Conducente", key=f"v_conducente_{i}_{ver}")
             with colV2:
-                modello = st.text_input(
-                    f"Modello Auto", value=v_esistente.get("modello", ""), key=f"v_modello_{i}_{ver}"
-                )
-                proprietario = st.text_input(
-                    f"Proprietario", value=v_esistente.get("proprietario", ""), key=f"v_proprietario_{i}_{ver}"
-                )
-        dati_veicoli.append(
-            {
-                "ruolo": ruolo,
-                "targa": targa,
-                "modello": modello,
-                "conducente": conducente,
-                "proprietario": proprietario,
-            }
-        )
+                modello = st.text_input(f"Modello Auto", key=f"v_modello_{i}_{ver}")
+                proprietario = st.text_input(f"Proprietario", key=f"v_proprietario_{i}_{ver}")
+        dati_veicoli.append({
+            "ruolo": ruolo,
+            "targa": targa,
+            "modello": modello,
+            "conducente": conducente,
+            "proprietario": proprietario,
+        })
+
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
