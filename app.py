@@ -574,14 +574,20 @@ def render_dashboard(client: Client):
     # ── Barra di ricerca globale ──────────────────────────────────────────────
     st.markdown("### 🔍 Ricerca")
     ricerca = st.text_input(
-        "Cerca per Cognome, Targa o Numero Protocollo",
-        placeholder="es. Rossi  |  AB123CD  |  P20260528-...",
+        "Cerca in tutti i campi",
+        placeholder="es. Rossi  |  AB123CD  |  P20260528-...  |  Generali  |  rca  |  Aperta  ...",
         label_visibility="collapsed",
     )
 
     if ricerca:
         mask = pd.Series([False] * len(df_filtrato), index=df_filtrato.index)
-        campi_ricerca = ["cognome_assistito", "numero_protocollo"]
+        campi_ricerca = [
+            "numero_protocollo", "cognome_assistito", "nome_assistito",
+            "codice_fiscale_assistito", "compagnia", "numero_sinistro",
+            "tipo_dinamica", "stato_pratica", "riparatore",
+            "perito_assegnato", "liquidatore", "note_generali",
+            "data_sinistro",
+        ]
         for campo in campi_ricerca:
             if campo in df_filtrato.columns:
                 mask |= df_filtrato[campo].astype(str).str.contains(ricerca, case=False, na=False)
@@ -734,19 +740,31 @@ DATI CORRENTI (formato CSV, {len(df)} righe totali, mostrate le prime {min(len(d
 def render_form_pratica(client: Client):
     """Rendering del form di inserimento/modifica pratica."""
 
+    # ── Contatore versione form (pattern reset affidabile) ──────────────────
+    # Ogni widget ha la sua key suffissata con il numero di versione.
+    # Incrementando il contatore, tutti i widget vengono ricreati da zero.
+    if "form_ver" not in st.session_state:
+        st.session_state["form_ver"] = 0
+    ver = st.session_state["form_ver"]
+
     in_modifica = "pratica_in_modifica" in st.session_state and st.session_state["pratica_in_modifica"]
     dati = st.session_state.get("pratica_in_modifica", {}) or {}
     veicoli_esistenti = st.session_state.get("veicoli_in_modifica", []) or []
 
     # ── Inizializzazione session_state BLOCCO C ──
-    if "input_dinamica" not in st.session_state:
-        st.session_state["input_dinamica"] = dati.get("dinamica_sintetica", "")
-    if "input_richieste" not in st.session_state:
-        st.session_state["input_richieste"] = dati.get("richieste", "")
-    if "output_dinamica" not in st.session_state:
-        st.session_state["output_dinamica"] = dati.get("dinamica_sintetica", "")
-    if "output_richieste" not in st.session_state:
-        st.session_state["output_richieste"] = dati.get("richieste", "")
+    if f"input_dinamica_{ver}" not in st.session_state:
+        st.session_state[f"input_dinamica_{ver}"] = dati.get("dinamica_sintetica", "")
+    if f"input_richieste_{ver}" not in st.session_state:
+        st.session_state[f"input_richieste_{ver}"] = dati.get("richieste", "")
+    if f"output_dinamica_{ver}" not in st.session_state:
+        st.session_state[f"output_dinamica_{ver}"] = dati.get("dinamica_sintetica", "")
+    if f"output_richieste_{ver}" not in st.session_state:
+        st.session_state[f"output_richieste_{ver}"] = dati.get("richieste", "")
+    # Alias senza versione per compatibilità con il resto del codice
+    _k_in_din  = f"input_dinamica_{ver}"
+    _k_in_req  = f"input_richieste_{ver}"
+    _k_out_din = f"output_dinamica_{ver}"
+    _k_out_req = f"output_richieste_{ver}"
 
     if in_modifica:
         st.markdown(f"## ✏️ Modifica Pratica — `{dati.get('numero_protocollo','')}`")
@@ -767,23 +785,23 @@ def render_form_pratica(client: Client):
 
     # Numero protocollo (generato o recuperato)
     numero_protocollo = dati.get("numero_protocollo") or genera_numero_protocollo()
-    st.text_input("Numero Protocollo", value=numero_protocollo, disabled=True, key="field_protocollo")
+    st.text_input("Numero Protocollo", value=numero_protocollo, disabled=True, key=f"field_protocollo_{ver}")
 
     # ── Riga 1: Dati identificativi assistito ─────────────────────────────────
     colA1, colA2, colA3 = st.columns(3)
     with colA1:
-        cognome = st.text_input("Cognome Assistito *", value=dati.get("cognome_assistito", ""), key="field_cognome")
+        cognome = st.text_input("Cognome Assistito *", value=dati.get("cognome_assistito", ""), key=f"field_cognome_{ver}")
     with colA2:
-        nome = st.text_input("Nome Assistito", value=dati.get("nome_assistito", ""), key="field_nome")
+        nome = st.text_input("Nome Assistito", value=dati.get("nome_assistito", ""), key=f"field_nome_{ver}")
     with colA3:
-        codice_fiscale = st.text_input("Codice Fiscale Assistito", value=dati.get("codice_fiscale_assistito", ""), key="field_cf")
+        codice_fiscale = st.text_input("Codice Fiscale Assistito", value=dati.get("codice_fiscale_assistito", ""), key=f"field_cf_{ver}")
 
     # ── Riga 2: Compagnia, sinistro, data ────────────────────────────────────
     colB1, colB2, colB3 = st.columns(3)
     with colB1:
-        compagnia = st.text_input("Compagnia Assicurativa", value=dati.get("compagnia", ""), key="field_compagnia")
+        compagnia = st.text_input("Compagnia Assicurativa", value=dati.get("compagnia", ""), key=f"field_compagnia_{ver}")
     with colB2:
-        numero_sinistro = st.text_input("Numero Sinistro", value=dati.get("numero_sinistro", ""), key="field_numero_sinistro")
+        numero_sinistro = st.text_input("Numero Sinistro", value=dati.get("numero_sinistro", ""), key=f"field_numero_sinistro_{ver}")
     with colB3:
         data_sinistro_val = None
         if dati.get("data_sinistro"):
@@ -791,7 +809,7 @@ def render_form_pratica(client: Client):
                 data_sinistro_val = datetime.date.fromisoformat(str(dati["data_sinistro"]))
             except Exception:
                 data_sinistro_val = None
-        data_sinistro = st.date_input("Data Sinistro", value=data_sinistro_val, key="field_data_sinistro")
+        data_sinistro = st.date_input("Data Sinistro", value=data_sinistro_val, key=f"field_data_sinistro_{ver}")
 
     # ── Riga 3: Tipo dinamica, riparatore, stato ─────────────────────────────
     colC1, colC2, colC3 = st.columns(3)
@@ -801,25 +819,25 @@ def render_form_pratica(client: Client):
             options=["cai", "60gg", "rca", "biologico"],
             index=["cai", "60gg", "rca", "biologico"].index(dati["tipo_dinamica"])
                    if dati.get("tipo_dinamica") in ["cai", "60gg", "rca", "biologico"] else 0,
-            key="field_tipo_dinamica",
+            key=f"field_tipo_dinamica_{ver}",
         )
     with colC2:
-        riparatore = st.text_input("Riparatore", value=dati.get("riparatore", ""), key="field_riparatore")
+        riparatore = st.text_input("Riparatore", value=dati.get("riparatore", ""), key=f"field_riparatore_{ver}")
     with colC3:
         stato_pratica = st.selectbox(
             "Stato Pratica",
             options=["Aperta", "In Chiusura", "Chiusa"],
             index=["Aperta", "In Chiusura", "Chiusa"].index(dati["stato_pratica"])
                    if dati.get("stato_pratica") in ["Aperta", "In Chiusura", "Chiusa"] else 0,
-            key="field_stato",
+            key=f"field_stato_{ver}",
         )
 
     # ── Riga 4: Perito, liquidatore, importo stimato ─────────────────────────
     colD1, colD2, colD3 = st.columns(3)
     with colD1:
-        perito_assegnato = st.text_input("Perito Assegnato", value=dati.get("perito_assegnato", ""), key="field_perito")
+        perito_assegnato = st.text_input("Perito Assegnato", value=dati.get("perito_assegnato", ""), key=f"field_perito_{ver}")
     with colD2:
-        liquidatore = st.text_input("Liquidatore", value=dati.get("liquidatore", ""), key="field_liquidatore")
+        liquidatore = st.text_input("Liquidatore", value=dati.get("liquidatore", ""), key=f"field_liquidatore_{ver}")
     with colD3:
         importo_raw = dati.get("importo_stimato", None)
         try:
@@ -832,11 +850,11 @@ def render_form_pratica(client: Client):
             value=importo_default,
             step=100.0,
             format="%.2f",
-            key="field_importo",
+            key=f"field_importo_{ver}",
         )
 
     # ── Riga 5: Note generali ─────────────────────────────────────────────────
-    note_generali = st.text_area("Note Generali", value=dati.get("note_generali", ""), height=80, key="field_note")
+    note_generali = st.text_area("Note Generali", value=dati.get("note_generali", ""), height=80, key=f"field_note_{ver}")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -850,7 +868,7 @@ def render_form_pratica(client: Client):
         max_value=10,
         value=num_veicoli_default,
         step=1,
-        key="field_num_veicoli",
+        key=f"field_num_veicoli_{ver}",
     )
 
     dati_veicoli = []
@@ -866,17 +884,17 @@ def render_form_pratica(client: Client):
             colV1, colV2 = st.columns(2)
             with colV1:
                 targa = st.text_input(
-                    f"Targa *", value=v_esistente.get("targa", ""), key=f"v_targa_{i}"
+                    f"Targa *", value=v_esistente.get("targa", ""), key=f"v_targa_{i}_{ver}"
                 )
                 conducente = st.text_input(
-                    f"Conducente", value=v_esistente.get("conducente", ""), key=f"v_conducente_{i}"
+                    f"Conducente", value=v_esistente.get("conducente", ""), key=f"v_conducente_{i}_{ver}"
                 )
             with colV2:
                 modello = st.text_input(
-                    f"Modello Auto", value=v_esistente.get("modello", ""), key=f"v_modello_{i}"
+                    f"Modello Auto", value=v_esistente.get("modello", ""), key=f"v_modello_{i}_{ver}"
                 )
                 proprietario = st.text_input(
-                    f"Proprietario", value=v_esistente.get("proprietario", ""), key=f"v_proprietario_{i}"
+                    f"Proprietario", value=v_esistente.get("proprietario", ""), key=f"v_proprietario_{i}_{ver}"
                 )
         dati_veicoli.append(
             {
@@ -896,7 +914,7 @@ def render_form_pratica(client: Client):
     # ─ CAMPO 1: Appunti grezzi dinamica (INPUT) ─────────────────────────────────
     st.text_area(
         "1. Dinamica Sintetica (Appunti Grezzi) *",
-        key="input_dinamica",
+        key=_k_in_din,
         height=100,
         placeholder="Scrivi qui la dinamica in modo grezzo. L'IA la rielaborerà in forma ufficiale.",
     )
@@ -904,7 +922,7 @@ def render_form_pratica(client: Client):
     # ─ CAMPO 2: Appunti grezzi richieste (INPUT) ───────────────────────────────
     st.text_area(
         "2. Richieste Danni (Appunti Grezzi)",
-        key="input_richieste",
+        key=_k_in_req,
         height=100,
         placeholder="Elenca le richieste in modo grezzo. L'IA le formalizzerà in linguaggio tecnico.",
     )
@@ -926,24 +944,24 @@ def render_form_pratica(client: Client):
             "importo_stimato": importo_stimato,
         }
         errori_ia = []
-        # Output 1: Dinamica formale — legge da input_dinamica
+        # Output 1: Dinamica formale — legge da _k_in_din
         try:
             with st.spinner("Rielaborazione dinamica in corso..."):
                 dinamica_formale = elabora_dinamica_ia(
                     dati_anag, dati_veicoli,
-                    st.session_state["input_dinamica"]
+                    st.session_state[_k_in_din]
                 )
-            st.session_state["output_dinamica"] = dinamica_formale
+            st.session_state[_k_out_din] = dinamica_formale
         except Exception as e:
             errori_ia.append(f"Dinamica: {e}")
-        # Output 2: Richieste formali — legge da input_richieste
+        # Output 2: Richieste formali — legge da _k_in_req
         try:
             with st.spinner("Formalizzazione richieste in corso..."):
                 richieste_formali = elabora_richieste_ia(
                     dati_anag,
-                    st.session_state["input_richieste"]
+                    st.session_state[_k_in_req]
                 )
-            st.session_state["output_richieste"] = richieste_formali
+            st.session_state[_k_out_req] = richieste_formali
         except Exception as e:
             errori_ia.append(f"Richieste: {e}")
 
@@ -957,7 +975,7 @@ def render_form_pratica(client: Client):
     # ─ CAMPO 3: Dinamica ufficiale (OUTPUT, modificabile) ──────────────────────
     st.text_area(
         "3. Dinamica Peritale Ufficiale (Modificabile) *",
-        key="output_dinamica",
+        key=_k_out_din,
         height=150,
         placeholder="Qui apparirà la dinamica rielaborata dall'IA. Puoi modificarla prima di salvare.",
     )
@@ -965,7 +983,7 @@ def render_form_pratica(client: Client):
     # ─ CAMPO 4: Richieste ufficiali (OUTPUT, modificabile) ─────────────────────
     st.text_area(
         "4. Analisi Richieste Ufficiale (Modificabile)",
-        key="output_richieste",
+        key=_k_out_req,
         height=150,
         placeholder="Qui apparirà l'analisi formalizzata delle richieste. Puoi modificarla prima di salvare.",
     )
@@ -982,9 +1000,9 @@ def render_form_pratica(client: Client):
                 errori.append("Il campo **Cognome Assistito** è obbligatorio.")
             if any(not v["targa"].strip() for v in dati_veicoli):
                 errori.append("La **Targa** è obbligatoria per ogni veicolo.")
-            # Usa output_dinamica se compilato, altrimenti fallback su input_dinamica
-            din_da_salvare = (st.session_state.get("output_dinamica") or "").strip() \
-                             or (st.session_state.get("input_dinamica") or "").strip()
+            # Usa _k_out_din se compilato, altrimenti fallback su _k_in_din
+            din_da_salvare = (st.session_state.get(_k_out_din) or "").strip() \
+                             or (st.session_state.get(_k_in_din) or "").strip()
             if not din_da_salvare:
                 errori.append("La **Dinamica Sintetica** è obbligatoria.")
 
@@ -993,8 +1011,8 @@ def render_form_pratica(client: Client):
                     st.error(e)
             else:
                 # Fallback intelligente: output se presente, altrimenti input
-                req_da_salvare = (st.session_state.get("output_richieste") or "").strip() \
-                                 or (st.session_state.get("input_richieste") or "").strip()
+                req_da_salvare = (st.session_state.get(_k_out_req) or "").strip() \
+                                 or (st.session_state.get(_k_in_req) or "").strip()
                 pratica_payload = {
                     "numero_protocollo": numero_protocollo,
                     "cognome_assistito": cognome.strip(),
@@ -1019,8 +1037,10 @@ def render_form_pratica(client: Client):
                     if ok:
                         st.success(messaggio)
                         if not in_modifica:
-                            for k in ["input_dinamica", "input_richieste", "output_dinamica", "output_richieste"]:
-                                st.session_state.pop(k, None)
+                            # Avanza la versione per svuotare il form dopo il salvataggio
+                            st.session_state["form_ver"] = st.session_state.get("form_ver", 0) + 1
+                            st.session_state.pop("pratica_in_modifica", None)
+                            st.session_state.pop("veicoli_in_modifica", None)
                             st.rerun()
                     else:
                         st.error(messaggio)
@@ -1029,10 +1049,11 @@ def render_form_pratica(client: Client):
 
     with col_clear:
         if st.button("🗑️ Svuota Form", use_container_width=True, key="btn_clear"):
-            for k in ["pratica_in_modifica", "veicoli_in_modifica",
-                      "input_dinamica", "input_richieste",
-                      "output_dinamica", "output_richieste"]:
-                st.session_state.pop(k, None)
+            # Incrementa il contatore di versione: tutti i widget ricevono
+            # nuove key e vengono ricreati da zero con i valori di default (vuoti).
+            st.session_state["form_ver"] = st.session_state.get("form_ver", 0) + 1
+            st.session_state.pop("pratica_in_modifica", None)
+            st.session_state.pop("veicoli_in_modifica", None)
             st.rerun()
 
 
@@ -1060,12 +1081,14 @@ def render_sistema(client: Client):
             st.error("❌ Client Supabase non inizializzato")
 
     with col2:
-        st.markdown("**OpenAI IA (opzionale)**")
-        openai_key = st.secrets.get("OPENAI_API_KEY", "")
-        if openai_key:
-            st.success("✅ Chiave OpenAI presente")
+        st.markdown("**Groq IA**")
+        groq_key = st.secrets.get("GROQ_API_KEY", "")
+        groq_url = st.secrets.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        if groq_key:
+            st.success("✅ Chiave Groq presente")
+            st.caption(f"Endpoint: `{groq_url}`")
         else:
-            st.warning("⚠️ Chiave OpenAI assente — la relazione IA usa il template")
+            st.warning("⚠️ Chiave Groq assente — le funzioni IA non saranno disponibili")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
