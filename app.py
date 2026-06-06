@@ -262,13 +262,91 @@ def salva_pratica(client: Client, dati_pratica: dict, dati_veicoli: list) -> tup
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPER: GENERAZIONE RELAZIONE IA (simulata / reale con Groq)
+# HELPER IA: DUE OUTPUT SEPARATI CON GROQ
 # ══════════════════════════════════════════════════════════════════════════════
-def genera_relazione_ia(dati_anagrafica: dict, veicoli: list, dinamica: str) -> str:
+def _groq_client():
+    """Restituisce un client OpenAI puntato su Groq. Solleva eccezione se la chiave manca."""
+    import openai
+    api_key = st.secrets.get("GROQ_API_KEY", "")
+    base_url = st.secrets.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY non configurata in secrets.toml")
+    return openai.OpenAI(api_key=api_key, base_url=base_url)
+
+
+def elabora_dinamica_ia(dati_anagrafica: dict, veicoli: list, dinamica_grezza: str) -> str:
     """
-    Genera una relazione formale.
-    Se le credenziali Groq sono configurate in secrets.toml, usa l'API Groq.
-    Altrimenti restituisce una relazione modello compilata.
+    Rielabora la dinamica sintetica grezza in un testo tecnico-peritale formale.
+    Restituisce il testo formale (str).
+    """
+    client_groq = _groq_client()
+    veicoli_str = "\n".join(
+        f"  - {v.get('ruolo','')}: Targa {v.get('targa','N/D')}, "
+        f"Modello {v.get('modello','N/D')}, Conducente {v.get('conducente','N/D')}"
+        for v in veicoli
+    )
+    prompt = f"""Sei un perito assicurativo esperto. Riscrivi la seguente dinamica di sinistro in italiano tecnico e peritale formale, \
+mantenendo tutti i fatti reali ma usando un linguaggio ufficiale adatto a una relazione peritale.
+
+CONTESTO PRATICA:
+- Assistito: {dati_anagrafica.get('cognome_assistito','')} {dati_anagrafica.get('nome_assistito','')}
+- Compagnia: {dati_anagrafica.get('compagnia','')}
+- Data sinistro: {dati_anagrafica.get('data_sinistro','')}
+- Tipo: {dati_anagrafica.get('tipo_dinamica','').upper()}
+
+VEICOLI COINVOLTI:
+{veicoli_str}
+
+DINAMICA GREZZA DA RIELABORARE:
+{dinamica_grezza if dinamica_grezza else '[Non fornita]'}
+
+Restituisci SOLO il testo rielaborato della dinamica, senza titoli, intestazioni o commenti aggiuntivi.
+"""
+    response = client_groq.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=800,
+        temperature=0.3,
+    )
+    print(f"--- CONSUMO GROQ [dinamica] --- Input: {response.usage.prompt_tokens} | Output: {response.usage.completion_tokens}")
+    return response.choices[0].message.content.strip()
+
+
+def elabora_richieste_ia(dati_anagrafica: dict, richieste_grezze: str) -> str:
+    """
+    Rielabora le richieste danni grezze in un'analisi tecnica formale.
+    Restituisce il testo formale (str).
+    """
+    client_groq = _groq_client()
+    prompt = f"""Sei un perito assicurativo esperto. Riscrivi le seguenti richieste danni in forma tecnica e formale, \
+articolando ogni punto in modo chiaro e professionale, adatto a una relazione peritale ufficiale.
+
+CONTESTO PRATICA:
+- Assistito: {dati_anagrafica.get('cognome_assistito','')} {dati_anagrafica.get('nome_assistito','')}
+- Compagnia: {dati_anagrafica.get('compagnia','')}
+- Importo stimato: {dati_anagrafica.get('importo_stimato','N/D')} €
+
+RICHIESTE GREZZE DA RIELABORARE:
+{richieste_grezze if richieste_grezze else '[Nessuna richiesta inserita]'}
+
+Restituisci SOLO il testo formale delle richieste, senza titoli, intestazioni o commenti aggiuntivi.
+"""
+    response = client_groq.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=600,
+        temperature=0.3,
+    )
+    print(f"--- CONSUMO GROQ [richieste] --- Input: {response.usage.prompt_tokens} | Output: {response.usage.completion_tokens}")
+    return response.choices[0].message.content.strip()
+
+
+# (mantenuta per compatibilità legacy — non più usata dal form principale)
+def genera_relazione_ia(dati_anagrafica: dict, veicoli: list, dinamica: str, richieste: str = "") -> str:
+    """
+    Genera una relazione formale usando Groq (llama-3.1-8b-instant).
+    Riceve anagrafica, veicoli, dinamica sintetica e richieste del perito.
+    Fallback: relazione template compilata se Groq non è disponibile.
     """
 
     # ── Tentativo con Groq ───────────────────────────────────────────────────
@@ -288,30 +366,47 @@ def genera_relazione_ia(dati_anagrafica: dict, veicoli: list, dinamica: str) -> 
                     for v in veicoli
                 ]
             )
-            prompt = f"""
-Sei un perito assicurativo esperto. Redigi una relazione peritale formale basandoti sui seguenti dati:
+            sezione_richieste = (
+                f"\nRICHIESTE DEL PERITO:\n{richieste}\n"
+                if richieste.strip() else ""
+            )
+            prompt = f"""Sei un perito assicurativo esperto. Redigi una relazione peritale formale e professionale basandoti ESCLUSIVAMENTE sui seguenti dati reali:
 
 ANAGRAFICA:
 - Protocollo: {dati_anagrafica.get('numero_protocollo','')}
 - Assistito: {dati_anagrafica.get('cognome_assistito','')} {dati_anagrafica.get('nome_assistito','')}
+- Codice Fiscale: {dati_anagrafica.get('codice_fiscale_assistito','')}
+- Numero Sinistro: {dati_anagrafica.get('numero_sinistro','')}
 - Compagnia: {dati_anagrafica.get('compagnia','')}
+- Perito Assegnato: {dati_anagrafica.get('perito_assegnato','')}
+- Liquidatore: {dati_anagrafica.get('liquidatore','')}
 - Data sinistro: {dati_anagrafica.get('data_sinistro','')}
-- Tipo dinamica: {dati_anagrafica.get('tipo_dinamica','')}
+- Tipo dinamica: {dati_anagrafica.get('tipo_dinamica','').upper()}
 - Riparatore: {dati_anagrafica.get('riparatore','')}
+- Importo Stimato: {dati_anagrafica.get('importo_stimato','N/D')} €
 
 VEICOLI COINVOLTI:
 {veicoli_str}
 
 DINAMICA SINTETICA:
-{dinamica}
+{dinamica if dinamica else '[Non fornita]'}
+{sezione_richieste}
+Struttura la relazione con le seguenti sezioni in ordine:
+1. INTESTAZIONE FORMALE (protocollo, data, compagnia, perito)
+2. SOGGETTO ASSISTITO
+3. VEICOLI COINVOLTI
+4. DINAMICA DEL SINISTRO
+5. ANALISI DELLE RICHIESTE (se presenti, rispondi punto per punto)
+6. CONCLUSIONI PERITALI
 
-Struttura la relazione con: intestazione formale, fatto (dinamica), veicoli coinvolti, conclusioni peritali.
+Usa un linguaggio formale e tecnico. Non aggiungere informazioni non presenti nei dati.
 """
             response = client_groq.chat.completions.create(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
+                max_tokens=2000,
             )
+            print(f"--- CONSUMO GROQ [relazione] --- Input: {response.usage.prompt_tokens} | Output: {response.usage.completion_tokens}")
             return response.choices[0].message.content
     except Exception:
         pass
@@ -626,6 +721,7 @@ DATI CORRENTI (formato CSV, {len(df)} righe totali, mostrate le prime {min(len(d
             max_tokens=512,
             temperature=0.2,
         )
+        print(f"--- CONSUMO GROQ [chat] --- Input: {response.usage.prompt_tokens} | Output: {response.usage.completion_tokens}")
         return response.choices[0].message.content
 
     except Exception as e:
@@ -641,6 +737,16 @@ def render_form_pratica(client: Client):
     in_modifica = "pratica_in_modifica" in st.session_state and st.session_state["pratica_in_modifica"]
     dati = st.session_state.get("pratica_in_modifica", {}) or {}
     veicoli_esistenti = st.session_state.get("veicoli_in_modifica", []) or []
+
+    # ── Inizializzazione session_state BLOCCO C ──
+    if "input_dinamica" not in st.session_state:
+        st.session_state["input_dinamica"] = dati.get("dinamica_sintetica", "")
+    if "input_richieste" not in st.session_state:
+        st.session_state["input_richieste"] = dati.get("richieste", "")
+    if "output_dinamica" not in st.session_state:
+        st.session_state["output_dinamica"] = dati.get("dinamica_sintetica", "")
+    if "output_richieste" not in st.session_state:
+        st.session_state["output_richieste"] = dati.get("richieste", "")
 
     if in_modifica:
         st.markdown(f"## ✏️ Modifica Pratica — `{dati.get('numero_protocollo','')}`")
@@ -663,20 +769,22 @@ def render_form_pratica(client: Client):
     numero_protocollo = dati.get("numero_protocollo") or genera_numero_protocollo()
     st.text_input("Numero Protocollo", value=numero_protocollo, disabled=True, key="field_protocollo")
 
-    colA1, colA2 = st.columns(2)
+    # ── Riga 1: Dati identificativi assistito ─────────────────────────────────
+    colA1, colA2, colA3 = st.columns(3)
     with colA1:
         cognome = st.text_input("Cognome Assistito *", value=dati.get("cognome_assistito", ""), key="field_cognome")
-        compagnia = st.text_input("Compagnia Assicurativa", value=dati.get("compagnia", ""), key="field_compagnia")
-        tipo_dinamica = st.selectbox(
-            "Tipo Dinamica",
-            options=["cai", "60gg", "rca", "biologico"],
-            index=["cai", "60gg", "rca", "biologico"].index(dati["tipo_dinamica"])
-                   if dati.get("tipo_dinamica") in ["cai", "60gg", "rca", "biologico"] else 0,
-            key="field_tipo_dinamica",
-        )
-        richieste = st.text_area("Richieste", value=dati.get("richieste", ""), height=80, key="field_richieste")
     with colA2:
         nome = st.text_input("Nome Assistito", value=dati.get("nome_assistito", ""), key="field_nome")
+    with colA3:
+        codice_fiscale = st.text_input("Codice Fiscale Assistito", value=dati.get("codice_fiscale_assistito", ""), key="field_cf")
+
+    # ── Riga 2: Compagnia, sinistro, data ────────────────────────────────────
+    colB1, colB2, colB3 = st.columns(3)
+    with colB1:
+        compagnia = st.text_input("Compagnia Assicurativa", value=dati.get("compagnia", ""), key="field_compagnia")
+    with colB2:
+        numero_sinistro = st.text_input("Numero Sinistro", value=dati.get("numero_sinistro", ""), key="field_numero_sinistro")
+    with colB3:
         data_sinistro_val = None
         if dati.get("data_sinistro"):
             try:
@@ -684,7 +792,20 @@ def render_form_pratica(client: Client):
             except Exception:
                 data_sinistro_val = None
         data_sinistro = st.date_input("Data Sinistro", value=data_sinistro_val, key="field_data_sinistro")
+
+    # ── Riga 3: Tipo dinamica, riparatore, stato ─────────────────────────────
+    colC1, colC2, colC3 = st.columns(3)
+    with colC1:
+        tipo_dinamica = st.selectbox(
+            "Tipo Dinamica",
+            options=["cai", "60gg", "rca", "biologico"],
+            index=["cai", "60gg", "rca", "biologico"].index(dati["tipo_dinamica"])
+                   if dati.get("tipo_dinamica") in ["cai", "60gg", "rca", "biologico"] else 0,
+            key="field_tipo_dinamica",
+        )
+    with colC2:
         riparatore = st.text_input("Riparatore", value=dati.get("riparatore", ""), key="field_riparatore")
+    with colC3:
         stato_pratica = st.selectbox(
             "Stato Pratica",
             options=["Aperta", "In Chiusura", "Chiusa"],
@@ -692,6 +813,30 @@ def render_form_pratica(client: Client):
                    if dati.get("stato_pratica") in ["Aperta", "In Chiusura", "Chiusa"] else 0,
             key="field_stato",
         )
+
+    # ── Riga 4: Perito, liquidatore, importo stimato ─────────────────────────
+    colD1, colD2, colD3 = st.columns(3)
+    with colD1:
+        perito_assegnato = st.text_input("Perito Assegnato", value=dati.get("perito_assegnato", ""), key="field_perito")
+    with colD2:
+        liquidatore = st.text_input("Liquidatore", value=dati.get("liquidatore", ""), key="field_liquidatore")
+    with colD3:
+        importo_raw = dati.get("importo_stimato", None)
+        try:
+            importo_default = float(importo_raw) if importo_raw not in (None, "") else 0.0
+        except (ValueError, TypeError):
+            importo_default = 0.0
+        importo_stimato = st.number_input(
+            "Importo Stimato (€)",
+            min_value=0.0,
+            value=importo_default,
+            step=100.0,
+            format="%.2f",
+            key="field_importo",
+        )
+
+    # ── Riga 5: Note generali ─────────────────────────────────────────────────
+    note_generali = st.text_area("Note Generali", value=dati.get("note_generali", ""), height=80, key="field_note")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -745,89 +890,149 @@ def render_form_pratica(client: Client):
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-    # ══ BLOCCO C — DINAMICA E IA ════════════════════════════════════════════
-    st.markdown('<div class="block-header">📝 BLOCCO C — Dinamica e Relazione IA</div>', unsafe_allow_html=True)
+    # ══ BLOCCO C — DINAMICA, RICHIESTE E TRASFORMAZIONE IA ══════════════════
+    st.markdown('<div class="block-header">📝 BLOCCO C — Dinamica e Richieste</div>', unsafe_allow_html=True)
 
-    dinamica = st.text_area(
-        "Dinamica Sintetica *",
-        value=dati.get("dinamica_sintetica", ""),
-        height=160,
-        placeholder="Descrivi brevemente la dinamica del sinistro...",
-        key="field_dinamica",
+    # ─ CAMPO 1: Appunti grezzi dinamica (INPUT) ─────────────────────────────────
+    st.text_area(
+        "1. Dinamica Sintetica (Appunti Grezzi) *",
+        key="input_dinamica",
+        height=100,
+        placeholder="Scrivi qui la dinamica in modo grezzo. L'IA la rielaborerà in forma ufficiale.",
     )
 
-    if st.button("🤖 Genera Relazione con IA", key="btn_genera_ia"):
+    # ─ CAMPO 2: Appunti grezzi richieste (INPUT) ───────────────────────────────
+    st.text_area(
+        "2. Richieste Danni (Appunti Grezzi)",
+        key="input_richieste",
+        height=100,
+        placeholder="Elenca le richieste in modo grezzo. L'IA le formalizzerà in linguaggio tecnico.",
+    )
+
+    # ─ PULSANTE IA ─────────────────────────────────────────────────────────────
+    if st.button("🤖 Elabora e Trasforma con IA", key="btn_genera_ia"):
         dati_anag = {
             "numero_protocollo": numero_protocollo,
             "cognome_assistito": cognome,
             "nome_assistito": nome,
+            "codice_fiscale_assistito": codice_fiscale,
+            "numero_sinistro": numero_sinistro,
             "compagnia": compagnia,
+            "perito_assegnato": perito_assegnato,
+            "liquidatore": liquidatore,
             "data_sinistro": str(data_sinistro) if data_sinistro else "",
             "tipo_dinamica": tipo_dinamica,
             "riparatore": riparatore,
+            "importo_stimato": importo_stimato,
         }
-        with st.spinner("Generazione relazione in corso..."):
-            relazione = genera_relazione_ia(dati_anag, dati_veicoli, dinamica)
-        st.session_state["relazione_generata"] = relazione
+        errori_ia = []
+        # Output 1: Dinamica formale — legge da input_dinamica
+        try:
+            with st.spinner("Rielaborazione dinamica in corso..."):
+                dinamica_formale = elabora_dinamica_ia(
+                    dati_anag, dati_veicoli,
+                    st.session_state["input_dinamica"]
+                )
+            st.session_state["output_dinamica"] = dinamica_formale
+        except Exception as e:
+            errori_ia.append(f"Dinamica: {e}")
+        # Output 2: Richieste formali — legge da input_richieste
+        try:
+            with st.spinner("Formalizzazione richieste in corso..."):
+                richieste_formali = elabora_richieste_ia(
+                    dati_anag,
+                    st.session_state["input_richieste"]
+                )
+            st.session_state["output_richieste"] = richieste_formali
+        except Exception as e:
+            errori_ia.append(f"Richieste: {e}")
 
-    relazione_generata = st.session_state.get("relazione_generata", dati.get("relazione_ia", ""))
-    relazione_finale = st.text_area(
-        "Relazione Peritale (modificabile)",
-        value=relazione_generata,
-        height=350,
-        placeholder="La relazione generata dall'IA apparirà qui...",
-        key="field_relazione",
+        if errori_ia:
+            for err in errori_ia:
+                st.error(f"❌ Errore IA — {err}")
+        else:
+            st.success("✅ Testi elaborati dall'IA. Controlla e modifica prima di salvare.")
+        st.rerun()
+
+    # ─ CAMPO 3: Dinamica ufficiale (OUTPUT, modificabile) ──────────────────────
+    st.text_area(
+        "3. Dinamica Peritale Ufficiale (Modificabile) *",
+        key="output_dinamica",
+        height=150,
+        placeholder="Qui apparirà la dinamica rielaborata dall'IA. Puoi modificarla prima di salvare.",
+    )
+
+    # ─ CAMPO 4: Richieste ufficiali (OUTPUT, modificabile) ─────────────────────
+    st.text_area(
+        "4. Analisi Richieste Ufficiale (Modificabile)",
+        key="output_richieste",
+        height=150,
+        placeholder="Qui apparirà l'analisi formalizzata delle richieste. Puoi modificarla prima di salvare.",
     )
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
     # ══ SALVATAGGIO ══════════════════════════════════════════════════════════
+    # Totalmente indipendente dall'IA: funziona sempre, anche senza IA.
     col_save, col_clear = st.columns([2, 1])
     with col_save:
         if st.button("💾 Salva Pratica", type="primary", use_container_width=True, key="btn_salva"):
-            # Validazione minima
             errori = []
             if not cognome.strip():
                 errori.append("Il campo **Cognome Assistito** è obbligatorio.")
             if any(not v["targa"].strip() for v in dati_veicoli):
                 errori.append("La **Targa** è obbligatoria per ogni veicolo.")
-            if not dinamica.strip():
+            # Usa output_dinamica se compilato, altrimenti fallback su input_dinamica
+            din_da_salvare = (st.session_state.get("output_dinamica") or "").strip() \
+                             or (st.session_state.get("input_dinamica") or "").strip()
+            if not din_da_salvare:
                 errori.append("La **Dinamica Sintetica** è obbligatoria.")
 
             if errori:
                 for e in errori:
                     st.error(e)
             else:
+                # Fallback intelligente: output se presente, altrimenti input
+                req_da_salvare = (st.session_state.get("output_richieste") or "").strip() \
+                                 or (st.session_state.get("input_richieste") or "").strip()
                 pratica_payload = {
                     "numero_protocollo": numero_protocollo,
                     "cognome_assistito": cognome.strip(),
                     "nome_assistito": nome.strip(),
+                    "codice_fiscale_assistito": codice_fiscale.strip(),
+                    "numero_sinistro": numero_sinistro.strip(),
                     "compagnia": compagnia.strip(),
+                    "perito_assegnato": perito_assegnato.strip(),
+                    "liquidatore": liquidatore.strip(),
                     "data_sinistro": str(data_sinistro) if data_sinistro else None,
                     "tipo_dinamica": tipo_dinamica,
                     "riparatore": riparatore.strip(),
-                    "richieste": richieste.strip(),
+                    "importo_stimato": importo_stimato if importo_stimato > 0 else None,
+                    "note_generali": note_generali.strip(),
                     "stato_pratica": stato_pratica,
-                    "dinamica_sintetica": dinamica.strip(),
-                    "relazione_ia": relazione_finale.strip(),
+                    "dinamica_sintetica": din_da_salvare,   # Box 3 > Box 1
+                    "richieste": req_da_salvare,            # Box 4 > Box 2
                 }
-                with st.spinner("Salvataggio in corso..."):
-                    ok, messaggio = salva_pratica(client, pratica_payload, dati_veicoli)
-
-                if ok:
-                    st.success(messaggio)
-                    # Reset form nuova pratica; mantieni dati se modifica
-                    if not in_modifica:
-                        st.session_state.pop("relazione_generata", None)
-                        st.rerun()
-                else:
-                    st.error(messaggio)
+                try:
+                    with st.spinner("Salvataggio in corso..."):
+                        ok, messaggio = salva_pratica(client, pratica_payload, dati_veicoli)
+                    if ok:
+                        st.success(messaggio)
+                        if not in_modifica:
+                            for k in ["input_dinamica", "input_richieste", "output_dinamica", "output_richieste"]:
+                                st.session_state.pop(k, None)
+                            st.rerun()
+                    else:
+                        st.error(messaggio)
+                except Exception as e:
+                    st.error(f"❌ Errore imprevisto durante il salvataggio: {e}")
 
     with col_clear:
         if st.button("🗑️ Svuota Form", use_container_width=True, key="btn_clear"):
-            st.session_state.pop("pratica_in_modifica", None)
-            st.session_state.pop("veicoli_in_modifica", None)
-            st.session_state.pop("relazione_generata", None)
+            for k in ["pratica_in_modifica", "veicoli_in_modifica",
+                      "input_dinamica", "input_richieste",
+                      "output_dinamica", "output_richieste"]:
+                st.session_state.pop(k, None)
             st.rerun()
 
 
